@@ -1,14 +1,16 @@
 #!/usr/bin/env python
 ######################################################################
 #
-# getfotolog.py  1.9
+#   Fotolog Archiver v 2.0 - Python script to crawl your fotolog pages 
 #
-# Python script to crawl your fotolog pages. Tested with Python 2.3
-# and 2.4.
+#   * based on the original script by will luo, photo (a t) wluo dot org
+#     from http://www.wluo.org/fotologarchiver/
+#   
+#   * modified by @nikkita126
+#  
+#   # tested with Python 2.7
 #
-# author: will luo, photo (a t) wluo dot org
-#
-# This software is released under the MFJ Software License:
+#  This software is released under the MFJ Software License:
 #
 #   http://www.motherfuckingjackson.com/license.html
 #
@@ -20,30 +22,10 @@
 
 
 
-
-
 import httplib, urlparse
 import requests
+import shutil # para guardar las imagenes
 import os, sys, time
-
-
-# define some constants
-HOST = 'www.fotolog.com'    # where to get the pages from
-IMGHOST = None              # image host
-GBHOST = None               # guestbook host
-
-
-# globals
-gconn = None     # page HTTPConnection
-ggbconn = None   # guest book HTTPConnection
-gimgconn = None  # image HTTPConnection
-
-# their cookie
-# typically we get something like this:
-#
-# Set-Cookie: FCED=iF0NJuzEtixYiDg0lyXVX2IyV%2Bjt8d3xRMDJ1JJl1woDIh14JbysdJ%2BNNXHF8ZY2Y0XmVaYMiS8Kkq%2F%2Ba2bjpyqg5SDcAMA%2Fxi0gLrMyHofL; expires=Wednesday, 15-Jan-20 05:00:00 GMT; path=/; domain=.fotolog.net
-#
-fced = None
 
 
 STYLE_BLOCK = None # style from the main page
@@ -59,155 +41,118 @@ def raise_error(msg, ex):
     raise ex
 
 
-def re_replace(pat, data, replacement=None):
+def get_style_block(css_group,orig_start,orig_end):
+    '''
+    find fotolog's stylesheets, download them to local files
+    and return a modified chunk of text with fixed references 
+    '''
+
+    #print >> sys.stdout,'---------------------',css_group
+
+    begin_at = 0
     while True:
-        m = pat.search(data)
-        if m is None:
+
+        i = css_group.find('<link rel="stylesheet"',begin_at)
+
+        if i<0:
             break
-        if replacement is not None:
-            data = data[:m.start()] + replacement + data[m.end():]
-        else:
-            data = data[:m.start()] + data[m.end():]
-    return data
+
+        istart = css_group.find('href=',i) + 6
+        iend = css_group.find('"',istart)
+
+        style_url = css_group[istart:iend]
 
 
-def get_style_block(html):
-    s = html.find('<style')
-    e = html.find('</style>', s+1)
-    e = html.find('</style>', e+1)
-    return html[s:e+8] + '\n'
+        # print >> sys.stdout,'---------------------',style_url
+
+        s_req = requests.get(style_url)
+
+        if s_req.status_code == 200:
+
+            tokens = style_url.split('styles/')
+            style_name = tokens[1] # ARCHIVO.css
+            tokens2=style_name.split('?') # Some css file had that character on its name and messed things up
+            style_name=tokens2[0]
+            s_data=s_req.text
+            save_content(style_name, s_data) # save stylesheet to local file
+
+            css_group = css_group.replace(style_url, style_name) # update chunk of text with css files
+
+        begin_at = iend    
+
+    return css_group
 
 
-def reset_HTTPConnection(conn):
+def set_style_block(data,STYLE_BLOCK):
     '''
-    reopen HTTPConnection
+    fix css references in the page 
     '''
-    conn.close()
-    conn.connect()
 
+    orig_start = data.find('<link rel="stylesheet"')
+    orig_end = data.find('<style')
 
-def get_response(conn, path):
-    '''
-    patiently wait for our response from the HTTPConnection conn.
-    path is the URL minus the protocol and host name
+    css_group = data[orig_start:orig_end] # chunk of text with css files
+
+    if STYLE_BLOCK == None:
+        STYLE_BLOCK = get_style_block(css_group,orig_start,orig_end)       
     
-    '''
-    global fced
-    conn_reset = False  # did we have to reset our HTTPConnection?
-    while True:
-        try:
-            #headers = {"USER-AGENT" : "Mozilla/5.0 (Windows; U; Windows NT 5.1; en-US; rv:1.7.10) Gecko/20050716 Firefox/1.0.6"}
-            #if (fced != None):
-            #    headers['Cookie'] = fced
-            #print 'fetching http://%s/%s' % (conn.host, path)
-            #conn.request('GET', path, '', headers)
-            #r = conn.getresponse()
-            #cookie = r.getheader('set-cookie', None)
-            #if (cookie != None):
-            #    idx = cookie.find('FCED');
-            #    idx1 = cookie.find(';', idx+1)
-            #    fced = cookie[idx:idx1]
-            aLink = 'http://%s%s' % (HOST,path)
+    data = data.replace(css_group,STYLE_BLOCK)
 
-            r = requests.get(aLink)
+    return data,STYLE_BLOCK
 
-            return r
-        except httplib.ResponseNotReady, ex:
-            print 'httplib.ResponseNotReady. retrying...'
-            reset_HTTPConnection(conn)
-            conn_reset = True
-            continue
-        except httplib.CannotSendRequest, ex:
-            print 'httplib.CannotSendRequest. retrying...'
-            reset_HTTPConnection(conn)
-            conn_reset = True
-            continue
-        except Exception, ex:
-            print 'ex:' + str(ex)   # keep going
-            print 'ex.args:' + str(ex.args) + ', len=' + str(len(ex.args))
-            if (len(ex.args) > 0) and (ex.args[0] == 10060):
-                continue    # timed out
-            elif not conn_reset:
-                print >> sys.stdout, 'establishing a new connection'
-                reset_HTTPConnection(conn)
-                conn_reset = True
-                continue
-            else:
-                raise ex
-
-
-#
-# save data in file fname
-#
 def save_content(fname, data):
+    '''
+    save text data in file fname
+    '''
     f = open(fname, 'wb')
-    f.write(data)
+    f.write(data.encode('utf8'))
     f.close()
 
 
-#
-# retrieve some content at url and save it as localfile in directory
-# named by the pid parameter in the request URL.
-#
 def save_image(fname, imgurl):
-    global IMGHOST, gimgconn
-    if IMGHOST is None:
-        u = urlparse.urlparse(imgurl)
-        IMGHOST = u[1]
-    if gimgconn is None:
-        gimgconn = httplib.HTTPConnection(IMGHOST)
-
-    r = get_response(gimgconn, imgurl)
-    clenhdr = r.getheader('content-length')
-    clen = 0
-    loopcnt = 0
-    while True:
-        # loop until we really get it
-        if (clenhdr != None):
-            print '...trying to read ' + clenhdr + ' bytes of image'
-        data = r.read()
-        if (len(data) >= clen):
-            break;
-        else:
-            print '...did not get the whole content. trying again.'
-            time.sleep(3.0)
-            r = get_response(gimgconn, imgurl) # try again
-            continue
-
-    save_content(fname, data)
-
-
+    '''
+    retrieve an image at url and save it as localfile
+    '''
+    response = requests.get(imgurl, stream=True)
+    
+    with open(fname, 'wb') as out_file:
+        shutil.copyfileobj(response.raw, out_file)
+    del response
 
 def fetch_image(data, pid):
     '''
     parse out the main image src url and fetch it. replace its
     reference in the page data with the local version
     '''
-    i = data.find('<meta property="og:image" content=')
-    if (i < 0):
-        raise_error('Unable to find mainphoto div', 'HTML changed')
+    i = data.find('<meta property="og:image" content="')
 
-    # start after the 'nextLink' keyword
-    i = data.find('<img src="', i)
-    if (i < 0):
-        raise_error('Unable to find main image URL', 'HTML changed')
 
-    istart = i+10
+    if (i < 0):
+        raise NameError('Unable to find main image URL', 'HTML changed')
+
+    
+    istart = i+35 # (35 = length of "<meta property="og:image...")
     iend = data.find('"', istart)
     if (iend < 0):
-        raise_error('Unable to extract image URL', 'HTML changed')
+        raise NameError('Unable to extract image URL', 'HTML changed')
+
     imgurl = data[istart:iend]
+
 
     # save the image locally
     imgname = pid+'.jpg'
     save_image(imgname, imgurl)
 
+
     # fixed the page html to point to the local image
     return data.replace(imgurl, imgname)
 
 
-# try to create a directory but ignore if it exists
 def create_dir(dirname):
+    '''
+    try to create a directory but ignore if it exists
+    '''
+
     try:
         os.mkdir(dirname)
     except Exception, ex:
@@ -241,120 +186,230 @@ def get_starturl():
 
 
 def clean_main_page(data):
-    # remove search banner
-    data = strip_sections(data, '<!-- begin hat -->','<!-- end hat -->')
+    '''
+    remove chunks of code from the original html file
+    that are not important
+    '''
 
-    # remove google ad div above the guestbook
-    data = strip_sections(data, '<div class="ad" id="googleAd', '</div>')
 
-    data = strip_sections(data, '<ul id="mainphotolinks">', '</ul>')
+    #####################################
+    ######## NON-WRAPPER
+    data = strip_sections(data, '<script', '</script>')
+    data = strip_sections(data, '<SCRIPT', '</SCRIPT>')
+ 
+    data = strip_sections(data, '<noscript', '</noscript>')
+    # remove fotolog ending message
+    data = strip_sections(data, '<div id="ExecuteOrder66"','</div>') #OK
 
-    data = strip_sections(data, '<script ', '</script>')
-    data = strip_sections(data, '<SCRIPT ', '</SCRIPT>')
-    data = strip_sections(data, '<div id="footer">', '</div>')
-    data = strip_sections(data, '<img src="http://v.fotologs.net/v.gif?', '/>')
+
+    data = strip_sections(data, '<div id="fb-root">', '</div>')   #OK
+    data = strip_sections(data,'<div id="flyout">','</div>') #OK
+
+    #
+    # remove log in bar
+    data = strip_sections(data, '<div id="logo">', '</div>') #OK
+    data = strip_sections(data, '<div id="head_bar_container">', '</div>') #OK
+    data = strip_sections(data, '<div id="head_bar">', '</div>')   #OK
+
+    #######################################
+    ########## WRAPPER
+
+    ###### FOOTER
+    data = strip_sections(data, '<div id="footer">', '</div>') # OK
+    
+    ###### CONTAINER
+
+    #### Anchor
+    data = strip_sections(data, '<a id="anchor_flog"', '</a>') # OK
+
+    #### Top and bottom pubs
+    data = strip_sections(data,'<div class="hmads','</div>')
+    data = strip_sections(data,'<div class="float_right"','</div>')
+    data = strip_sections(data,'<div id="bottom_pub">','</div>')
+    data = strip_sections(data,'<div id="top_pub">','</div>')
+
+    #### promoted banners
+    data = strip_sections(data,'<div id="promoted_banner">','</div>')
+
+    #### Wall Column Left
+
+    # "heart" button
+    data = strip_sections(data,'<div class="flog_flash_button button_visible">','</div>') #OK
+
+    # share buttons
+    data = strip_sections(data, '<div class="fb-like"', '</div>') #OK
+    data = strip_sections(data, '<div id="flog_img_action">', '</div>') #OK
+
+    # slider
+    data = strip_sections(data,'<div id="slide_left"','</div>')
+    data = strip_sections(data,'<div id="slide_right"','</div>')
+    data = strip_sections(data,'<div id="slide_container"','</div>')
+    data = strip_sections(data,'<div id="block_slide"','</div>')
+
+    # "Iniciar sesion para comentar"
+    data = strip_sections(data,'<div class="flog_img_comments" id="comment_form">','</div>')
+
+    # remove share plugin holder
+    data = strip_sections(data, '<div id="facebook"', '</div>') #OK
+    data = strip_sections(data, '<div id="twitter"', '</div>') #OK
+    data = strip_sections(data, '<div id="pin"', '</div>') #OK
+    data = strip_sections(data, '<div id="share-plugin-holder">', '</div>') #OK
+
+    #### Wall right column
+    data = strip_sections(data,'<div class="wall_right_block">','</div>')
+    data = strip_sections(data,'<div id="wall_right_column">','</div>')
+  
+    ########
+    # loader
+    data = strip_sections(data,'<div class="loader">','</div>')
+    data = strip_sections(data,'<div class="contentWrap">','</div>')
+    data = strip_sections(data,'<div class="overlay">','</div>')
+
+    ########   
     return data
 
 
-def fix_nav_links(data, pid, div_class):
+def fix_nav_links(data, pid, link_type):
     '''
     replace the previous/next url with an url pointing to the local one.
     return data and prev or next pid.
     '''
-    i = data.find('<li class="%s">' % div_class)
+
+    to_concat = None
+    if link_type == 'previous':
+        to_concat = ''
+
+    elif link_type == 'next':
+        to_concat = ' arrow_change_photo_right'
+
+    to_find = '<a class="arrow_change_photo%s"' % to_concat
+
+   
+    i = data.find(to_find)
+
     if i < 0:
-        raise_error('Unable to find %s link' % div_class, 'HTML changed')
+        if link_type == 'next':
+            navpid = None
+            return data,navpid
+        raise NameError('Unable to find %s link' % link_type, 'HTML changed')
 
-    # look for the href inside the <li> block
-    endi = data.find('</li>', i)
-    li_block = data[i:endi+5]
 
-    hrefi = li_block.find('<a href="')
+    endi = data.find('</a>', i)
+    class_block = data[i:endi+4]
+
+    hrefi = class_block.find('href="')
 
     if hrefi < 0:
         # no nav link
-        print '%s page not found' % div_class
+        print '%s page not found' % link_type
         return data, None
 
     # parse out the url
-    hrefend = li_block.find('">', hrefi+1)
-    navurl = li_block[hrefi+9:hrefend]
-    segs = navurl.split('/')
-    navpid = segs[4]
+    hrefend = class_block.find('">', hrefi)
+
+    navurl = class_block[hrefi+6:hrefend] # DUDA CUANTO SUMAR
+    segs = navurl.split('/') # ['http:','','www.fotolog.com','USERNAME','pageID',[extra]]
+    navpid = segs[4] # page ID
     new_navurl = navpid + '.html'
 
     data = data.replace(navurl, new_navurl)
     return data, navpid
 
+def remove_hidden_posts(data):
 
-def main_loop(username, pid):
+    data = data.replace('<div class="flog_img_comments is_hidden">','<div class="flog_img_comments">')
+    data = strip_sections(data,'<a class="gb_show_all"','</a>')
+
+    return data
+
+def main_loop(username, pid,count):
     '''
     the main loop. down load all images, pages and comments for user "username"
     starting at photo id "pid"
     '''
-    # set up our http connection
-    global gconn
-    #gconn = httplib.HTTPConnection(HOST)
-    #gconn.set_debuglevel(1)
 
-    # first page is a somewhat special case. initialize everything
-    # we need before going into the main loop
-    path = '/%s/%s/' % (username, pid)
+    
 
-   # print >> sys.stdout, 'gconn: ', gconn, ' - path: ', path
 
-    r = get_response(gconn, path)
-    if r.status_code != 200:    # error
-        
-        raise_error('Encountered an HTTP error:%d %s' % (r.status, r.reason),
-                    'HTTP error')
-    data = r.text
-    global STYLE_BLOCK
-    STYLE_BLOCK = get_style_block(data)
+    global gconn #  BORRAR
+ 
+    STYLE_BLOCK = None
+    #STYLE_BLOCK  # save css files
+
     prevpid = None
     nexturl = None
 
     while True:
+        path = 'http://www.fotolog.com/%s/%s/' % (username, pid)
+        
+        r = requests.get(path)
+        
+        if r.status_code != 200:    # error
+            raise NameError('Encountered an HTTP error:%d %s' % (r.status, r.reason),
+                    'HTTP error')
+
+        data = r.text # the html page
+
+        message = 'retrieving page %s...' % count
+        sys.stdout.write(message)
+        
+
+        
+        data = fetch_image(data, pid) 
         data = clean_main_page(data)
-        data = fetch_image(data, pid)
-        data, prevpid = fix_nav_links(data, pid, 'previous')
-        data, nextpid = fix_nav_links(data, pid, 'next')
+        data,STYLE_BLOCK = set_style_block(data,STYLE_BLOCK)
+
+
+        if data.find('<a class="gb_show_all"') > 0:
+            data = remove_hidden_posts(data)
+
+
+        if count > 1:
+            data, prevpid = fix_nav_links(data, pid, 'previous') # fix references to previous photo
+        data, nextpid = fix_nav_links(data, pid, 'next')         # fix references to next photo
+        
         filename = pid+'.html'
         save_content(filename, data)
 
+        sys.stdout.write(' done!\n')
+
         if not nextpid:
-            print "\nReached the most recent page. We\'re done!\n"
+            print "\nReached the last page. We\'re done!\n"
             break
+        else:
+            # advance pid to the next page and start all over again
+            prevpid = pid
+            pid = nextpid
 
-        # advance pid to the next page and start all over again
-        prevpid = pid
-        pid = nextpid
+            # give fotolog a break
+            time.sleep(1.0)
+            count = count+1
 
-        # give fotolog a break
-        time.sleep(2.0)
-
-        # load up the next one
-        nexturl = '/%s/%s' % (username, pid)
-        r = get_response(gconn, nexturl)
-        if (r.status != 200):
-            raise_error('error fetching next page: %s (%d %s)' %
-                        (nexturl, r.status, r.reason), 'HTTP error')
-        data = r.read()
-
-    gconn.close()     # done!
+   # gconn.close()     # done!
 
 
 def print_header():
-    print >> sys.stdout, '\n<<< fotolog archiver 1.9 >>>'
-    print >> sys.stdout, '     (c) 2007 will luo'
-    print >> sys.stdout, '  photo (a t) wluo dot org\n'
+    print >> sys.stdout, '\n<<< fotolog archiver 2.0 >>>'
+    print >> sys.stdout, '     v 1.9 (c) 2007 will luo'
+    print >> sys.stdout, '  modified by @nikkita126\n'
 
+
+def create_start_page(pid):
+    text='<html><head><META http-equiv="refresh" content="0;URL=%s.html"></head></html>' % pid
+
+    f = open('start.html', 'w')
+    f.write(text.encode('utf8'))
+    f.close()
 
 ######################################################################
 #
 # main
 #
 if __name__ == '__main__':
+    
+    starting_time = time.time()
+
+
     print_header()
 
     if len(sys.argv) > 1:
@@ -366,13 +421,16 @@ if __name__ == '__main__':
 
     # get the user name from the url
     if starturl.find('/') == -1:
-        raise 'Invalid URL'
+        raise NameError('Invalid URL')
     tokens = starturl.split('/')
     if len(tokens) < 5:
-        raise 'The URL you entered does not look like a valid fotolog URL'
+        raise NameError('The URL you entered does not look like a valid fotolog URL')
 
     username = tokens[3]
-
+    ## TO-DO:
+    # flujo en caso de que ya exista la carpeta
+    if os.path.exists(username):
+        shutil.rmtree(username)
     create_dir(username)
     os.chdir(username)
 
@@ -381,9 +439,14 @@ if __name__ == '__main__':
     # URL given by the user, which is slightly different than what we'll
     # see from the "next >>" links on the pages we will fetch later.
     ids = tokens[4].split('=')
-    pid = ids[-1]
+    start_pid = ids[-1]
 
     
+    count=1
 
+    main_loop(username,start_pid,count)
+    create_start_page(start_pid)
 
-    main_loop(username, pid)
+    ending_time=time.time()
+
+    print >> sys.stdout,'\nELAPSED TIME: ',ending_time - starting_time
