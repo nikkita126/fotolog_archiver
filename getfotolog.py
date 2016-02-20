@@ -13,7 +13,17 @@
 #   http://www.motherfuckingjackson.com/license.html
 #
 ######################################################################
+#   Modificaciones:
+#   - conexion establecida usando la libreria requests
+#
+#
+
+
+
+
+
 import httplib, urlparse
+import requests
 import os, sys, time
 
 
@@ -86,17 +96,21 @@ def get_response(conn, path):
     conn_reset = False  # did we have to reset our HTTPConnection?
     while True:
         try:
-            headers = {"USER-AGENT" : "Mozilla/5.0 (Windows; U; Windows NT 5.1; en-US; rv:1.7.10) Gecko/20050716 Firefox/1.0.6"}
-            if (fced != None):
-                headers['Cookie'] = fced
-            print 'fetching http://%s/%s' % (conn.host, path)
-            conn.request('GET', path, '', headers)
-            r = conn.getresponse()
-            cookie = r.getheader('set-cookie', None)
-            if (cookie != None):
-                idx = cookie.find('FCED');
-                idx1 = cookie.find(';', idx+1)
-                fced = cookie[idx:idx1]
+            #headers = {"USER-AGENT" : "Mozilla/5.0 (Windows; U; Windows NT 5.1; en-US; rv:1.7.10) Gecko/20050716 Firefox/1.0.6"}
+            #if (fced != None):
+            #    headers['Cookie'] = fced
+            #print 'fetching http://%s/%s' % (conn.host, path)
+            #conn.request('GET', path, '', headers)
+            #r = conn.getresponse()
+            #cookie = r.getheader('set-cookie', None)
+            #if (cookie != None):
+            #    idx = cookie.find('FCED');
+            #    idx1 = cookie.find(';', idx+1)
+            #    fced = cookie[idx:idx1]
+            aLink = 'http://%s%s' % (HOST,path)
+
+            r = requests.get(aLink)
+
             return r
         except httplib.ResponseNotReady, ex:
             print 'httplib.ResponseNotReady. retrying...'
@@ -169,7 +183,7 @@ def fetch_image(data, pid):
     parse out the main image src url and fetch it. replace its
     reference in the page data with the local version
     '''
-    i = data.find('<div id="mainphoto">')
+    i = data.find('<meta property="og:image" content=')
     if (i < 0):
         raise_error('Unable to find mainphoto div', 'HTML changed')
 
@@ -280,18 +294,21 @@ def main_loop(username, pid):
     '''
     # set up our http connection
     global gconn
-    gconn = httplib.HTTPConnection(HOST)
+    #gconn = httplib.HTTPConnection(HOST)
     #gconn.set_debuglevel(1)
 
     # first page is a somewhat special case. initialize everything
     # we need before going into the main loop
-    path = '/%s/%s' % (username, pid)
+    path = '/%s/%s/' % (username, pid)
+
+   # print >> sys.stdout, 'gconn: ', gconn, ' - path: ', path
 
     r = get_response(gconn, path)
-    if r.status != 200:    # error
+    if r.status_code != 200:    # error
+        
         raise_error('Encountered an HTTP error:%d %s' % (r.status, r.reason),
                     'HTTP error')
-    data = r.read()
+    data = r.text
     global STYLE_BLOCK
     STYLE_BLOCK = get_style_block(data)
     prevpid = None
@@ -365,5 +382,8 @@ if __name__ == '__main__':
     # see from the "next >>" links on the pages we will fetch later.
     ids = tokens[4].split('=')
     pid = ids[-1]
-        
+
+    
+
+
     main_loop(username, pid)
