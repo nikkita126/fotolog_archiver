@@ -18,7 +18,7 @@ The script downloads the HTML pages from a fotolog user's account and creates ne
 
 ### Usage
 
-# Windows users
+#### Windows users
 Once you've installed Python 2.7 and the `requests` library, download and save the script to your computer. To run it, open the command line `(Search > cmd > Enter)`, write the path to the python executable and the path to the script. Something like:
 
 `C:\Python27\python.exe C:\Users\Your-user\Desktop\getfotolog.py`
@@ -28,6 +28,10 @@ These paths may vary depending on where you put the files into your computer.
 The script will prompt you for a starting URL to start crawling. You must provide a URL in the following form: `http://www.fotolog.com/useraccount/photonumberid/` (the number at the end is necessary). The software will then start crwaling the files, from the URL you entered until the **oldest** photo is reached. This may take several minutes depending on the number of pictures that were previously uploaded to the account.
 
 After the program completes its task, there should be a file called `start.html` in the same folder where the photos and pages were saved. Now you can open that with your favorite browser and remember old times (:
+
+#### Linux/Mac
+
+You probably know how to run a python script :P just provide the starting URL as described above.
 
 ### Known problems/possible improvements
 
