@@ -31,12 +31,12 @@ The software will then start crawling the files, from the URL you entered until 
 
 After the program completes its task, there should be a file called `start.html` in the same folder where the photos and pages were saved. Now you can open that with your favorite browser and remember old times (:
 
-#### Linux/Mac
+#### Linux/Mac users
 
 You probably know how to run a python script :P just provide the starting URL as described above.
 
 ### Known problems/possible improvements
 
 Unfortunately, you can only go from one photo to the previous or the next one; there is no way to see all photos in a calendar grid as provided originally by fotolog. Nevertheless, you can just open any of the HTML files created and use that as a starting point, if you don't want to go through all your timeline.
-A
-lso, I didn't have the time to remove the user avatars from the guestbook, so they will appear as broken links once fotolog shuts down for good ):
+
+Also, I didn't have the time to remove the user avatars from the guestbook, so they will appear as broken links once fotolog shuts down for good ):
