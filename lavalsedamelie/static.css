@@ -1,0 +1,36 @@
+/* mobile apps */
+#container.mobile_apps .entry {
+  width: 260px; 
+  float: left; 
+  text-align: center;
+}
+#container.mobile_apps .entry.second {
+  margin-left: 125px;
+}
+#container.mobile_apps .entry .capture {
+  margin: 15px auto;
+}
+#container.mobile_apps h3 {
+  font-size: 16px;
+}
+#container.mobile_apps h4.blue {
+  font-size: 16px;
+  color: #06CDFE;
+  text-transform: none;
+  font-weight: bold;
+  margin: 35px 0;
+  text-align: center;
+}
+#container.mobile_apps ul.desc {
+  list-style-type: disc;
+  margin: 15px auto 40px auto;
+  width: 660px;
+}
+#container.mobile_apps ul.desc li {
+  margin: 18px 0 0 0;
+  color: #666666;
+}
+#container.mobile_apps #entries {
+  width: 650px;
+  margin: 35px auto;
+}
